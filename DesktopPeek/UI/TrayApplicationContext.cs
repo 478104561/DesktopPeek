@@ -44,7 +44,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _tray = new NotifyIcon
         {
             Text = "Desktop Peek",
-            Icon = SystemIcons.Application,
+            Icon = LoadAppIcon(),
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
@@ -55,6 +55,37 @@ internal sealed class TrayApplicationContext : ApplicationContext
             "Desktop Peek",
             $"已在后台运行。悬停桌面空白处启用透视。\n{AdminHelper.StatusText()}\n热键: Ctrl+` 切换 / Win+Esc 紧急恢复",
             ToolTipIcon.Info);
+    }
+
+    private static Icon LoadAppIcon()
+    {
+        try
+        {
+            var path = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(path))
+            {
+                var associated = Icon.ExtractAssociatedIcon(path);
+                if (associated is not null)
+                    return associated;
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
+        try
+        {
+            var icoPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+            if (File.Exists(icoPath))
+                return new Icon(icoPath);
+        }
+        catch
+        {
+            // fall through
+        }
+
+        return SystemIcons.Application;
     }
 
     private ContextMenuStrip BuildMenu()

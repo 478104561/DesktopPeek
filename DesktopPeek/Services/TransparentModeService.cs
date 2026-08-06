@@ -24,7 +24,7 @@ internal sealed class TransparentModeService : IDisposable
     private bool _active;
     private FadeDirection _direction = FadeDirection.None;
     private DateTime _animStartUtc;
-    private double _animStartT; // progress 0..1 when animation (re)started / reversed
+    private double _animStartT;
 
     public TransparentModeService()
     {
@@ -48,7 +48,6 @@ internal sealed class TransparentModeService : IDisposable
                 if (!_active || _saved.Count == 0)
                     return;
 
-                // Hot-update while peeked (not during restore fade)
                 if (_direction == FadeDirection.ToRestore)
                     return;
 
@@ -67,7 +66,6 @@ internal sealed class TransparentModeService : IDisposable
     {
         lock (_sync)
         {
-            // Reverse an in-progress restore
             if (_active && _direction == FadeDirection.ToRestore)
             {
                 StartAnimation(FadeDirection.ToPeek, reverse: true);
@@ -114,7 +112,6 @@ internal sealed class TransparentModeService : IDisposable
                         HadAlpha = hadAlpha
                     };
 
-                    // Click-through immediately; alpha starts at original (fade down)
                     ApplyPeekStyles(hwnd, originalAlpha);
                 }
                 catch
@@ -167,7 +164,6 @@ internal sealed class TransparentModeService : IDisposable
     {
         if (reverse && _direction != FadeDirection.None)
         {
-            // Continue from mirrored progress so reverse feels continuous
             var elapsed = (DateTime.UtcNow - _animStartUtc).TotalMilliseconds;
             var t = Math.Clamp(_animStartT + elapsed / FadeDurationMs, 0.0, 1.0);
             _animStartT = 1.0 - t;
@@ -223,8 +219,6 @@ internal sealed class TransparentModeService : IDisposable
                         to = state.OriginalAlpha;
                     }
 
-                    // When reversing mid-flight, map t against true endpoints but
-                    // use current visual if we started reverse — linear on endpoints is fine.
                     var alpha = (byte)Math.Round(from + (to - from) * t);
                     SetAlphaOnly(state.Handle, alpha);
                 }
@@ -243,7 +237,6 @@ internal sealed class TransparentModeService : IDisposable
                 }
                 else
                 {
-                    // Snap to final peek opacity
                     foreach (var hwnd in _saved.Keys.ToList())
                         SetAlphaOnly(hwnd, _opacity);
                     StopAnimation();
