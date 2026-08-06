@@ -85,6 +85,11 @@ internal static class WindowEnumerator
             && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0)
             return false;
 
+        // Already-layered windows (Qt pets, overlays, UpdateLayeredWindow) cannot be
+        // safely peeked: SetLayeredWindowAttributes permanently breaks per-pixel alpha.
+        if ((exStyle & NativeConstants.WS_EX_LAYERED) != 0)
+            return false;
+
         var className = NativeMethods.GetClassName(hWnd);
         if (ExcludedClassNames.Contains(className))
             return false;
