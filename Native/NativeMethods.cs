@@ -33,6 +33,9 @@ internal static class NativeMethods
     public static extern IntPtr WindowFromPoint(POINT point);
 
     [DllImport("user32.dll")]
+    public static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+
+    [DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

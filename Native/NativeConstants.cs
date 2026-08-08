@@ -47,4 +47,8 @@ internal static class NativeConstants
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_FRAMECHANGED = 0x0020;
+
+    public const uint RdwInvalidate = 0x0001;
+    public const uint RdwUpdateNow = 0x0100;
+    public const uint RdwAllChildren = 0x0080;
 }

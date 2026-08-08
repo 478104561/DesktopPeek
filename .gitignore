@@ -2,6 +2,8 @@
 bin/
 obj/
 publish/
+tools/**/bin/
+tools/**/obj/
 *.user
 *.suo
 .vs/

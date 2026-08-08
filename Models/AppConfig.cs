@@ -21,7 +21,8 @@ internal sealed class AppConfig
     /// <summary>Continuous desktop hover required before peek (0–3000 ms, default 500).</summary>
     public int HoverDelayMs { get; set; } = 500;
 
-    public bool AutoStart { get; set; }
+    /// <summary>Launch at Windows logon (default on).</summary>
+    public bool AutoStart { get; set; } = true;
 
     public static AppConfig Load()
     {
@@ -35,6 +36,9 @@ internal sealed class AppConfig
                 {
                     cfg.Opacity = ClampOpacity(cfg.Opacity);
                     cfg.HoverDelayMs = ClampHoverDelay(cfg.HoverDelayMs);
+                    // Older configs omitted AutoStart; JSON bool defaulted to false — keep default on.
+                    if (json.IndexOf("AutoStart", StringComparison.OrdinalIgnoreCase) < 0)
+                        cfg.AutoStart = true;
                     return cfg;
                 }
             }

@@ -18,6 +18,7 @@ internal sealed class TransparentModeService : IDisposable
     private readonly object _sync = new();
     private readonly Dictionary<nint, WindowStateInfo> _saved = new();
     private readonly System.Windows.Forms.Timer _fadeTimer;
+    private readonly LayeredWindowCoverService _layeredCovers = new();
 
     private IntPtr _selfHwnd;
     private byte _opacity = 50;
@@ -68,6 +69,8 @@ internal sealed class TransparentModeService : IDisposable
         {
             if (_active && _direction == FadeDirection.ToRestore)
             {
+                // Re-park layered apps when reversing a restore mid-animation.
+                _layeredCovers.ShowCovers(WindowEnumerator.GetLayeredCoverTargets(_selfHwnd));
                 StartAnimation(FadeDirection.ToPeek, reverse: true);
                 return;
             }
@@ -76,6 +79,11 @@ internal sealed class TransparentModeService : IDisposable
                 return;
 
             var windows = WindowEnumerator.GetTargetWindows(_selfHwnd);
+            var layeredCovers = WindowEnumerator.GetLayeredCoverTargets(_selfHwnd);
+
+            // Park Snipaste / PureRef / pets off-screen so real desktop icons stay usable.
+            _layeredCovers.ShowCovers(layeredCovers);
+
             foreach (var hwnd in windows)
             {
                 try
@@ -90,17 +98,12 @@ internal sealed class TransparentModeService : IDisposable
                     var hadLayered = (exStyle & NativeConstants.WS_EX_LAYERED) != 0;
                     var hadTransparent = (exStyle & NativeConstants.WS_EX_TRANSPARENT) != 0;
 
+                    // Layered targets are excluded upstream; keep defensive no-op.
+                    if (hadLayered)
+                        continue;
+
                     byte originalAlpha = 255;
                     bool hadAlpha = false;
-                    if (hadLayered)
-                    {
-                        if (NativeMethods.GetLayeredWindowAttributes(hwnd, out _, out byte alpha, out uint flags)
-                            && (flags & NativeConstants.LWA_ALPHA) != 0)
-                        {
-                            originalAlpha = alpha;
-                            hadAlpha = true;
-                        }
-                    }
 
                     _saved[hwnd] = new WindowStateInfo
                     {
@@ -129,10 +132,16 @@ internal sealed class TransparentModeService : IDisposable
     {
         lock (_sync)
         {
-            if (!_active && _saved.Count == 0)
+            if (!_active && _saved.Count == 0 && _layeredCovers.ActiveCount == 0)
                 return;
 
+            // Restore parked layered apps immediately.
+            _layeredCovers.Clear();
+
             if (_direction == FadeDirection.ToRestore)
+                return;
+
+            if (!_active && _saved.Count == 0)
                 return;
 
             if (_direction == FadeDirection.ToPeek)
@@ -150,6 +159,7 @@ internal sealed class TransparentModeService : IDisposable
         lock (_sync)
         {
             StopAnimation();
+            _layeredCovers.Clear();
             FinishRestoreLocked();
         }
     }
@@ -337,6 +347,7 @@ internal sealed class TransparentModeService : IDisposable
     public void Dispose()
     {
         ExitImmediate();
+        _layeredCovers.Dispose();
         _fadeTimer.Tick -= OnFadeTick;
         _fadeTimer.Dispose();
     }

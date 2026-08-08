@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using DesktopPeek.Native;
+using System.Drawing;
+using System.Windows.Forms;
 
 namespace DesktopPeek.Services;
 
@@ -45,6 +47,28 @@ internal static class WindowEnumerator
         "SystemSettings",
     };
 
+    /// <summary>
+    /// Only these layered apps get wallpaper covers. Fullscreen overlays (TabTip / NVIDIA)
+    /// must not be covered — that blanketed the desktop.
+    /// </summary>
+    private static readonly HashSet<string> LayeredCoverProcessAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Snipaste",
+        "PureRef",
+    };
+
+    private static readonly HashSet<string> LayeredCoverProcessBlocklist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "TabTip",
+        "TabTip32",
+        "NVIDIA Share",
+        "NVIDIA Overlay",
+        "nvcontainer",
+        "TextInputHost",
+        "ShellExperienceHost",
+        "ApplicationFrameHost",
+    };
+
     public static List<IntPtr> GetTargetWindows(IntPtr selfHwnd)
     {
         var result = new List<IntPtr>();
@@ -70,6 +94,127 @@ internal static class WindowEnumerator
         return result;
     }
 
+    /// <summary>
+    /// Layered windows we must not mutate; cover overlays hide them visually instead.
+    /// </summary>
+    public static List<LayeredCoverTarget> GetLayeredCoverTargets(IntPtr selfHwnd)
+    {
+        var result = new List<LayeredCoverTarget>();
+        var selfPid = (uint)Environment.ProcessId;
+
+        NativeMethods.EnumWindows((hWnd, _) =>
+        {
+            try
+            {
+                if (!TryGetLayeredCoverTarget(hWnd, selfHwnd, selfPid, out var target))
+                    return true;
+                result.Add(target);
+            }
+            catch
+            {
+                // skip inaccessible windows
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return result;
+    }
+
+    private static bool TryGetLayeredCoverTarget(
+        IntPtr hWnd, IntPtr selfHwnd, uint selfPid, out LayeredCoverTarget target)
+    {
+        target = default;
+        if (hWnd == IntPtr.Zero || hWnd == selfHwnd)
+            return false;
+        if (!NativeMethods.IsWindow(hWnd) || !NativeMethods.IsWindowVisible(hWnd))
+            return false;
+
+        var exStyle = NativeMethods.GetWindowLong(hWnd, NativeConstants.GWL_EXSTYLE);
+        if ((exStyle & NativeConstants.WS_EX_LAYERED) == 0)
+            return false;
+
+        var owner = NativeMethods.GetWindow(hWnd, NativeConstants.GW_OWNER);
+        if (!NativeMethods.GetWindowRect(hWnd, out var rect))
+            return false;
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        // Skip tiny owned tooltips; keep Snipaste-sized paste boards.
+        if (owner != IntPtr.Zero
+            && (exStyle & NativeConstants.WS_EX_TOOLWINDOW) != 0
+            && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0
+            && (width < 48 || height < 48))
+            return false;
+
+        var className = NativeMethods.GetClassName(hWnd);
+        if (ExcludedClassNames.Contains(className))
+            return false;
+
+        if (NativeMethods.DwmGetWindowAttribute(hWnd, NativeConstants.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
+            && cloaked != 0)
+            return false;
+
+        if (width <= 1 || height <= 1)
+            return false;
+
+        NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+        if (pid == 0 || pid == selfPid)
+            return false;
+
+        string procName;
+        try
+        {
+            using var proc = Process.GetProcessById((int)pid);
+            procName = proc.ProcessName;
+            if (ExcludedProcessNames.Contains(procName))
+                return false;
+            if (LayeredCoverProcessBlocklist.Contains(procName))
+                return false;
+            if (!IsLayeredCoverProcess(procName))
+                return false;
+        }
+        catch
+        {
+            return false;
+        }
+
+        // Ignore windows parked far off the virtual desktop (stale displace leftovers).
+        var bounds = new Rectangle(rect.Left, rect.Top, width, height);
+        if (!SystemInformation.VirtualScreen.IntersectsWith(bounds))
+            return false;
+
+        // Fullscreen layered hosts are almost never the apps we want to peek-cover.
+        if (IsExactMonitorBounds(bounds) && !LayeredCoverProcessAllowlist.Contains(procName))
+            return false;
+
+        target = new LayeredCoverTarget(hWnd, procName, rect.Left, rect.Top, width, height);
+        return true;
+    }
+
+    private static bool IsLayeredCoverProcess(string procName)
+    {
+        if (LayeredCoverProcessAllowlist.Contains(procName))
+            return true;
+        // Desktop pets (e.g. 呆啵宠物)
+        if (procName.Contains("宠物", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("pet", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("呆啵", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    private static bool IsExactMonitorBounds(Rectangle bounds)
+    {
+        foreach (var screen in Screen.AllScreens)
+        {
+            if (screen.Bounds == bounds)
+                return true;
+        }
+
+        return false;
+    }
+
     public static bool ShouldProcess(IntPtr hWnd, IntPtr selfHwnd, uint selfPid)
     {
         if (hWnd == IntPtr.Zero || hWnd == selfHwnd)
@@ -85,8 +230,9 @@ internal static class WindowEnumerator
             && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0)
             return false;
 
-        // Already-layered windows (Qt pets, overlays, UpdateLayeredWindow) cannot be
-        // safely peeked: SetLayeredWindowAttributes permanently breaks per-pixel alpha.
+        // Already-layered windows (Qt pets / Snipaste / PureRef / UpdateLayeredWindow)
+        // cannot be safely peeked from an external process — SLWA, ShowWindow, and
+        // SetWindowPos all break their composition/input after restore.
         if ((exStyle & NativeConstants.WS_EX_LAYERED) != 0)
             return false;
 

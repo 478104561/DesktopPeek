@@ -41,7 +41,7 @@ if ($Version) {
 $ver = Get-ProjectVersion $csproj
 Write-Host "Publishing Desktop Peek v$ver (win-x64 single-file)..." -ForegroundColor Cyan
 
-Get-Process -Name "DesktopPeek" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process | Where-Object { $_.ProcessName -like "DesktopPeek*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
 $outDir = Join-Path $PSScriptRoot "publish"

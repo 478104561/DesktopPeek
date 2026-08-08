@@ -21,8 +21,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _config = AppConfig.Load();
-        if (_config.AutoStart != AutostartService.IsEnabled())
-            _config.AutoStart = AutostartService.IsEnabled();
+        try
+        {
+            // Apply config (default on) and refresh Run path after publish/move.
+            AutostartService.SetEnabled(_config.AutoStart);
+            _config.Save();
+        }
+        catch
+        {
+            // registry may be restricted; tray toggle still available
+        }
 
         _transparent = new TransparentModeService { Opacity = _config.Opacity };
 

@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-Get-Process -Name "DesktopPeek" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process | Where-Object { $_.ProcessName -like "DesktopPeek*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
 Write-Host "Building & starting Desktop Peek (dotnet run)..." -ForegroundColor Cyan
