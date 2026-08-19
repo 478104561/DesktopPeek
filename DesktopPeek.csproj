@@ -12,7 +12,7 @@
     <Product>Desktop Peek</Product>
     <Description>Desktop transparent peek tool for Windows</Description>
     <!-- Bump this (or pass -Version to publish.ps1) before each release -->
-    <Version>1.1.3</Version>
+    <Version>1.1.5</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>

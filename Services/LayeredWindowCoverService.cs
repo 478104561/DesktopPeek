@@ -3,7 +3,7 @@ using DesktopPeek.Native;
 namespace DesktopPeek.Services;
 
 /// <summary>
-/// Parks Snipaste / PureRef / desktop-pet layered windows off the virtual desktop
+/// Parks Snipaste / PureRef / UU Remote / desktop-pet layered windows off the virtual desktop
 /// during peek so the real desktop (and icons) remain visible and clickable.
 /// Does not use wallpaper covers or SetLayeredWindowAttributes.
 /// </summary>

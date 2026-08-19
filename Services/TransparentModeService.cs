@@ -81,7 +81,7 @@ internal sealed class TransparentModeService : IDisposable
             var windows = WindowEnumerator.GetTargetWindows(_selfHwnd);
             var layeredCovers = WindowEnumerator.GetLayeredCoverTargets(_selfHwnd);
 
-            // Park Snipaste / PureRef / pets off-screen so real desktop icons stay usable.
+            // Park Snipaste / PureRef / UU Remote / pets off-screen so real desktop icons stay usable.
             _layeredCovers.ShowCovers(layeredCovers);
 
             foreach (var hwnd in windows)
@@ -135,13 +135,22 @@ internal sealed class TransparentModeService : IDisposable
             if (!_active && _saved.Count == 0 && _layeredCovers.ActiveCount == 0)
                 return;
 
-            // Restore parked layered apps immediately.
+            // Restore parked layered / Qt apps immediately.
             _layeredCovers.Clear();
 
             if (_direction == FadeDirection.ToRestore)
                 return;
 
-            if (!_active && _saved.Count == 0)
+            // Only parked apps were peeked (nothing in _saved to fade). Finish now so
+            // _active clears — otherwise Enter() no-ops after the first Exit.
+            if (_saved.Count == 0)
+            {
+                StopAnimation();
+                FinishRestoreLocked();
+                return;
+            }
+
+            if (!_active)
                 return;
 
             if (_direction == FadeDirection.ToPeek)

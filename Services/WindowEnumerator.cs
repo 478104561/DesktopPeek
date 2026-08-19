@@ -48,13 +48,19 @@ internal static class WindowEnumerator
     };
 
     /// <summary>
-    /// Only these layered apps get wallpaper covers. Fullscreen overlays (TabTip / NVIDIA)
-    /// must not be covered — that blanketed the desktop.
+    /// Layered apps parked off-screen during peek. Fullscreen overlays (TabTip / NVIDIA)
+    /// must not be parked — that blanketed the desktop.
     /// </summary>
     private static readonly HashSet<string> LayeredCoverProcessAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Snipaste",
         "PureRef",
+        "UUClient",
+        "UUCloud",
+        "UURemote",
+        "GameViewer",
+        "GameViewerServer",
+        "uuyc",
     };
 
     private static readonly HashSet<string> LayeredCoverProcessBlocklist = new(StringComparer.OrdinalIgnoreCase)
@@ -131,30 +137,12 @@ internal static class WindowEnumerator
             return false;
 
         var exStyle = NativeMethods.GetWindowLong(hWnd, NativeConstants.GWL_EXSTYLE);
-        if ((exStyle & NativeConstants.WS_EX_LAYERED) == 0)
-            return false;
-
         var owner = NativeMethods.GetWindow(hWnd, NativeConstants.GW_OWNER);
         if (!NativeMethods.GetWindowRect(hWnd, out var rect))
             return false;
 
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
-        // Skip tiny owned tooltips; keep Snipaste-sized paste boards.
-        if (owner != IntPtr.Zero
-            && (exStyle & NativeConstants.WS_EX_TOOLWINDOW) != 0
-            && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0
-            && (width < 48 || height < 48))
-            return false;
-
-        var className = NativeMethods.GetClassName(hWnd);
-        if (ExcludedClassNames.Contains(className))
-            return false;
-
-        if (NativeMethods.DwmGetWindowAttribute(hWnd, NativeConstants.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
-            && cloaked != 0)
-            return false;
-
         if (width <= 1 || height <= 1)
             return false;
 
@@ -171,7 +159,7 @@ internal static class WindowEnumerator
                 return false;
             if (LayeredCoverProcessBlocklist.Contains(procName))
                 return false;
-            if (!IsLayeredCoverProcess(procName))
+            if (!IsLayeredCoverProcess(procName, hWnd))
                 return false;
         }
         catch
@@ -179,28 +167,62 @@ internal static class WindowEnumerator
             return false;
         }
 
+        // Skip tiny owned tooltips; keep Snipaste-sized paste boards / UU bars.
+        if (owner != IntPtr.Zero
+            && (exStyle & NativeConstants.WS_EX_TOOLWINDOW) != 0
+            && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0
+            && (width < 48 || height < 48))
+            return false;
+
+        var className = NativeMethods.GetClassName(hWnd);
+        if (ExcludedClassNames.Contains(className))
+            return false;
+
         // Ignore windows parked far off the virtual desktop (stale displace leftovers).
         var bounds = new Rectangle(rect.Left, rect.Top, width, height);
         if (!SystemInformation.VirtualScreen.IntersectsWith(bounds))
             return false;
 
         // Fullscreen layered hosts are almost never the apps we want to peek-cover.
-        if (IsExactMonitorBounds(bounds) && !LayeredCoverProcessAllowlist.Contains(procName))
+        if (IsExactMonitorBounds(bounds) && !IsLayeredCoverProcess(procName, hWnd))
             return false;
 
         target = new LayeredCoverTarget(hWnd, procName, rect.Left, rect.Top, width, height);
         return true;
     }
 
-    private static bool IsLayeredCoverProcess(string procName)
+    private static bool IsLayeredCoverProcess(string procName, IntPtr hWnd = default)
     {
         if (LayeredCoverProcessAllowlist.Contains(procName))
+            return true;
+        if (procName.Contains("uuremote", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("uucloud", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("uuclient", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("gameviewer", StringComparison.OrdinalIgnoreCase)
+            || procName.Contains("uuyc", StringComparison.OrdinalIgnoreCase))
             return true;
         // Desktop pets (e.g. 呆啵宠物)
         if (procName.Contains("宠物", StringComparison.OrdinalIgnoreCase)
             || procName.Contains("pet", StringComparison.OrdinalIgnoreCase)
             || procName.Contains("呆啵", StringComparison.OrdinalIgnoreCase))
             return true;
+
+        if (hWnd != IntPtr.Zero)
+        {
+            try
+            {
+                var title = NativeMethods.GetWindowTitle(hWnd);
+                if (!string.IsNullOrEmpty(title)
+                    && (title.Contains("UU远程", StringComparison.OrdinalIgnoreCase)
+                        || title.Contains("UU 远程", StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         return false;
     }
 
@@ -226,14 +248,30 @@ internal static class WindowEnumerator
         // Owned popups without app window style are often tooltips/menus
         var owner = NativeMethods.GetWindow(hWnd, NativeConstants.GW_OWNER);
         var exStyle = NativeMethods.GetWindowLong(hWnd, NativeConstants.GWL_EXSTYLE);
+        NativeMethods.GetWindowThreadProcessId(hWnd, out uint pidEarly);
+        string? procName = null;
+        try
+        {
+            if (pidEarly != 0)
+            {
+                using var proc = Process.GetProcessById((int)pidEarly);
+                procName = proc.ProcessName;
+            }
+        }
+        catch
+        {
+            procName = null;
+        }
+
         if (owner != IntPtr.Zero && (exStyle & NativeConstants.WS_EX_TOOLWINDOW) != 0
-            && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0)
+            && (exStyle & NativeConstants.WS_EX_APPWINDOW) == 0
+            && (procName is null || !IsLayeredCoverProcess(procName, hWnd)))
             return false;
 
-        // Already-layered windows (Qt pets / Snipaste / PureRef / UpdateLayeredWindow)
-        // cannot be safely peeked from an external process — SLWA, ShowWindow, and
-        // SetWindowPos all break their composition/input after restore.
-        if ((exStyle & NativeConstants.WS_EX_LAYERED) != 0)
+        // Already-layered windows, and Qt hosts like UU Remote / Snipaste / pets:
+        // do not mutate alpha — they are parked off-screen instead.
+        if ((exStyle & NativeConstants.WS_EX_LAYERED) != 0
+            || (procName is not null && IsLayeredCoverProcess(procName, hWnd)))
             return false;
 
         var className = NativeMethods.GetClassName(hWnd);
@@ -258,8 +296,12 @@ internal static class WindowEnumerator
 
         try
         {
-            using var proc = Process.GetProcessById((int)pid);
-            var name = proc.ProcessName;
+            var name = procName;
+            if (name is null)
+            {
+                using var proc = Process.GetProcessById((int)pid);
+                name = proc.ProcessName;
+            }
             if (ExcludedProcessNames.Contains(name))
                 return false;
         }
